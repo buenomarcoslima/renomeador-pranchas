@@ -38,7 +38,9 @@ export function detectRevision(partText: string): DetectedRevision | null {
   }
 }
 
-export function splitFileNameIntoParts(fileNameWithoutExtension: string): ParsedPart[] {
+export function splitFileNameIntoParts(
+  fileNameWithoutExtension: string,
+): ParsedPart[] {
   const rawParts = fileNameWithoutExtension
     .split(/[_.-]/)
     .map((part) => part.trim())
@@ -48,11 +50,11 @@ export function splitFileNameIntoParts(fileNameWithoutExtension: string): Parsed
     const revision = detectRevision(part)
 
     return {
-      id: `part-${index}-${part}`,
+      id: `part-${index}-${part}-${crypto.randomUUID()}`,
       text: part,
       enabled: true,
       originalIndex: index,
-      isRevision: !!revision,
+      isRevision: Boolean(revision),
       revisionPrefix: revision ? revision.prefix : null,
       revisionNumber: revision ? revision.number : null,
     }
@@ -91,7 +93,10 @@ export function reorderParts(
   return updated
 }
 
-export function updateRevisionParts(parts: ParsedPart[], newNumber: string): ParsedPart[] {
+export function updateRevisionParts(
+  parts: ParsedPart[],
+  newNumber: string,
+): ParsedPart[] {
   const sanitizedNumber = newNumber.trim()
 
   if (!sanitizedNumber) {
@@ -169,7 +174,7 @@ export function createPresetFromTemplate(
   templateParts: ParsedPart[],
 ): RenamePreset {
   return {
-    id: `preset-${Date.now()}`,
+    id: `preset-${Date.now()}-${crypto.randomUUID()}`,
     name: name.trim(),
     joinWith,
     partOrder: templateParts.map((part) => part.originalIndex),

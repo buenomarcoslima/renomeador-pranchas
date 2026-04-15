@@ -39,36 +39,54 @@ export default function SortablePartItem({
       {...attributes}
       {...listeners}
       className={[
-        'inline-flex min-h-[52px] max-w-full items-center gap-3 rounded-2xl border px-4 py-3 shadow-sm select-none transition',
-        isDragging
-          ? 'z-50 cursor-grabbing border-sky-300 bg-sky-50 opacity-80 shadow-lg'
-          : 'cursor-grab',
+        'rounded-2xl border bg-white p-4 shadow-sm transition',
         part.enabled
-          ? 'border-sky-200 bg-sky-50'
-          : 'border-slate-200 bg-slate-100',
+          ? 'border-slate-200'
+          : 'border-slate-200 bg-slate-50 opacity-70',
+        isDragging ? 'scale-[1.02] shadow-lg' : '',
       ].join(' ')}
     >
-      {!isDragging && (
-        <input
-          type="checkbox"
-          checked={part.enabled}
-          onChange={() => onToggle(part.id)}
-          onClick={(event) => event.stopPropagation()}
-          onPointerDown={stopDragStart}
-          onMouseDown={stopDragStart}
-          onTouchStart={stopDragStart}
-          className="h-4 w-4 shrink-0 rounded border-slate-300"
-        />
-      )}
+      <div className="flex items-start gap-3">
+        {!isDragging && (
+          <input
+            type="checkbox"
+            checked={part.enabled}
+            onChange={() => onToggle(part.id)}
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={stopDragStart}
+            onMouseDown={stopDragStart}
+            onTouchStart={stopDragStart}
+            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+          />
+        )}
 
-      <span
-        className={[
-          'break-words text-sm font-medium tracking-tight',
-          part.enabled ? 'text-slate-800' : 'text-slate-500 line-through',
-        ].join(' ')}
-      >
-        {part.text}
-      </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-800">{part.text}</p>
+
+          <div className="mt-2 flex flex-wrap gap-2">
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
+              posição original: {part.originalIndex + 1}
+            </span>
+
+            {part.isRevision && (
+              <span className="rounded-full bg-sky-100 px-2 py-1 text-xs text-sky-700">
+                revisão detectada
+              </span>
+            )}
+
+            <span
+              className={[
+                'rounded-full px-2 py-1 text-xs',
+                part.enabled
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-rose-100 text-rose-700',
+              ].join(' ')}
+            >
+              {part.enabled ? 'incluído' : 'excluído'}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -1,77 +1,39 @@
-<<<<<<< HEAD
-# React + TypeScript + Vite
+# Renomeador de Pranchas
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Ferramenta web em React + Vite para padronização e renomeação de arquivos **PDF** e **DWG** com foco em fluxos de documentação técnica.
 
-Currently, two official plugins are available:
+## Funcionalidades
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Upload de arquivos PDF e DWG
+- Organização de blocos com drag and drop
+- Ativação e desativação de partes do nome
+- Presets salvos localmente no navegador
+- Importação e exportação de presets em JSON
+- Revisão global quando detectada no nome
+- Preview em tempo real
+- Exportação dos arquivos renomeados em ZIP
+- Deploy via GitHub Pages
 
-## React Compiler
+## Privacidade e processamento local
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Todos os arquivos são processados localmente no navegador.
 
-## Expanding the ESLint configuration
+Na prática, isso significa que os nomes dos arquivos, os PDFs, os DWGs, a revisão global, os presets e a geração do ZIP acontecem diretamente no computador do usuário durante o uso da ferramenta.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+A aplicação **não depende de upload dos arquivos para a nuvem** para executar a renomeação no fluxo normal de uso, o que oferece mais privacidade, mais controle e mais segurança para o processo.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Tecnologias
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- React
+- Vite
+- TypeScript
+- Tailwind CSS
+- dnd-kit
+- JSZip
+- file-saver
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Rodando localmente
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-=======
-# renomeador-pranchas
->>>>>>> 394768e76c1fef3d4620d8b83134aec8adf44496
+```bash
+npm install
+npm run dev

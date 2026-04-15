@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import PresetEditor from './components/PresetEditor'
+import AppFooter from './components/AppFooter'
+import { usePresetStorage } from './hooks/usePresetStorage'
 import type { ParsedPart, RenamePreset, RenamingFile } from './types/fileTypes'
 import {
   applyPresetToTemplateParts,
@@ -15,38 +17,27 @@ import {
   splitFileNameIntoParts,
   updateRevisionParts,
 } from './utils/fileNameUtils'
+import {
+  exportPresetsToJson,
+  importPresetsFromFile,
+} from './utils/presetTransfer'
 
-const PRESETS_STORAGE_KEY = 'renomeador-pranchas-presets'
+const APP_VERSION = '1.1.0'
 
-function App() {
+export default function App() {
   const [files, setFiles] = useState<RenamingFile[]>([])
-  const [joinWith, setJoinWith] = useState(' - ')
+  const [joinWith, setJoinWith] = useState<string>(' - ')
   const [templateParts, setTemplateParts] = useState<ParsedPart[]>([])
-  const [globalRevision, setGlobalRevision] = useState('')
-  const [presetName, setPresetName] = useState('')
-  const [savedPresets, setSavedPresets] = useState<RenamePreset[]>([])
+  const [globalRevision, setGlobalRevision] = useState<string>('')
+  const [presetName, setPresetName] = useState<string>('')
+  const [statusMessage, setStatusMessage] = useState<string>('')
 
-  useEffect(() => {
-    const storedPresets = localStorage.getItem(PRESETS_STORAGE_KEY)
+  const { savedPresets, savePreset, deletePreset, replaceAllPresets } =
+    usePresetStorage()
 
-    if (!storedPresets) {
-      return
-    }
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
-    try {
-      const parsedPresets = JSON.parse(storedPresets) as RenamePreset[]
-      setSavedPresets(parsedPresets)
-    } catch (error) {
-      console.error('Erro ao carregar presets salvos:', error)
-    }
-  }, [])
-
-  function persistPresets(presets: RenamePreset[]) {
-    setSavedPresets(presets)
-    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets))
-  }
-
-  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = event.target.files
 
     if (!selectedFiles) {
@@ -66,7 +57,7 @@ function App() {
         const newName = buildFileName(parts, joinWith, extension)
 
         return {
-          id: `${file.name}-${index}`,
+          id: `${file.name}-${index}-${crypto.randomUUID()}`,
           originalFile: file,
           originalName: file.name,
           baseName,
@@ -81,9 +72,13 @@ function App() {
 
     if (parsedFiles.length > 0) {
       setTemplateParts(parsedFiles[0].parts)
+      setStatusMessage(`${parsedFiles.length} arquivo(s) válidos carregados.`)
     } else {
       setTemplateParts([])
+      setStatusMessage('Nenhum arquivo PDF ou DWG válido foi identificado.')
     }
+
+    event.target.value = ''
   }
 
   function handleTemplatePartsChange(updatedParts: ParsedPart[]) {
@@ -106,9 +101,11 @@ function App() {
         }
       }),
     )
+
+    setStatusMessage('Regra aplicada a todos os arquivos.')
   }
 
-  function handleJoinWithChange(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleJoinWithChange(event: ChangeEvent<HTMLInputElement>) {
     setJoinWith(event.target.value)
   }
 
@@ -133,9 +130,11 @@ function App() {
         }
       }),
     )
+
+    setStatusMessage(`Revisão global "${revisionValue}" aplicada.`)
   }
 
-  function savePreset() {
+  function handleSavePreset() {
     const cleanName = presetName.trim()
 
     if (!cleanName || templateParts.length === 0) {
@@ -143,19 +142,13 @@ function App() {
     }
 
     const newPreset = createPresetFromTemplate(cleanName, joinWith, templateParts)
-
-    const updatedPresets = [
-      ...savedPresets.filter((preset) => preset.name !== cleanName),
-      newPreset,
-    ]
-
-    persistPresets(updatedPresets)
+    savePreset(newPreset)
     setPresetName('')
+    setStatusMessage(`Preset "${cleanName}" salvo com sucesso.`)
   }
 
   function loadPreset(preset: RenamePreset) {
     setJoinWith(preset.joinWith)
-
     setTemplateParts((currentParts) => {
       if (currentParts.length === 0) {
         return currentParts
@@ -163,14 +156,15 @@ function App() {
 
       return applyPresetToTemplateParts(currentParts, preset)
     })
-  }
 
-  function deletePreset(presetId: string) {
-    const updatedPresets = savedPresets.filter((preset) => preset.id !== presetId)
-    persistPresets(updatedPresets)
+    setStatusMessage(`Preset "${preset.name}" carregado.`)
   }
 
   async function downloadZip() {
+    if (files.length === 0) {
+      return
+    }
+
     const zip = new JSZip()
 
     files.forEach((file) => {
@@ -180,6 +174,56 @@ function App() {
 
     const content = await zip.generateAsync({ type: 'blob' })
     saveAs(content, 'arquivos-renomeados.zip')
+  }
+
+  function handleExportPresets() {
+    if (savedPresets.length === 0) {
+      setStatusMessage('Não há presets salvos para exportar.')
+      return
+    }
+
+    exportPresetsToJson(savedPresets)
+    setStatusMessage('Presets exportados em JSON com sucesso.')
+  }
+
+  function handleOpenImport() {
+    importInputRef.current?.click()
+  }
+
+  async function handleImportPresets(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFile = event.target.files?.[0]
+
+    if (!selectedFile) {
+      return
+    }
+
+    try {
+      const importedPresets = await importPresetsFromFile(selectedFile)
+
+      const mergedPresets = [
+        ...savedPresets.filter(
+          (saved) =>
+            !importedPresets.some(
+              (imported) => imported.name.trim() === saved.name.trim(),
+            ),
+        ),
+        ...importedPresets,
+      ]
+
+      replaceAllPresets(mergedPresets)
+      setStatusMessage(
+        `${importedPresets.length} preset(s) importado(s) com sucesso.`,
+      )
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível importar os presets.'
+
+      setStatusMessage(message)
+    } finally {
+      event.target.value = ''
+    }
   }
 
   const templatePreview = useMemo(() => {
@@ -195,94 +239,108 @@ function App() {
   }, [templateParts])
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mb-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <span className="inline-flex rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-sky-700">
-                Renomeador de pranchas
+    <main className="min-h-screen bg-slate-50 text-slate-900">
+      <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <header className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <span className="inline-flex rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-sky-700">
+                Ferramenta local para PDF e DWG
               </span>
-              <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-950">
-                Padronize nomes de PDF e DWG
+
+              <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">
+                Renomeador de pranchas
               </h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                Envie arquivos, reorganize os blocos, salve presets, ajuste revisão global
-                e baixe tudo em ZIP.
+
+              <p className="mt-4 text-base leading-7 text-slate-600">
+                Padronize nomes de arquivos com mais consistência. Faça upload de
+                PDFs e DWGs, reorganize blocos com drag and drop, aplique revisão
+                global, salve presets e exporte tudo em ZIP.
               </p>
             </div>
 
-            <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-700">
-              <span className="font-semibold">Arquivos válidos:</span> {files.length}
+            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
+              <p className="font-medium text-slate-800">Versão {APP_VERSION}</p>
+              <p>Processamento local no navegador</p>
             </div>
           </div>
-        </div>
 
-        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-6">
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-slate-950">Entrada e ações</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Faça upload, ajuste o separador final e aplique a regra em lote.
-              </p>
+          {statusMessage && (
+            <div className="mt-6 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+              {statusMessage}
+            </div>
+          )}
+        </header>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Arquivos PDF e DWG
-                  </label>
-                  <input
-                    type="file"
-                    multiple
-                    accept=".pdf,.dwg"
-                    onChange={handleFileChange}
-                    className="block w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm text-slate-700 file:mr-4 file:rounded-xl file:border-0 file:bg-sky-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-sky-700"
-                  />
-                </div>
+        <section className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-slate-900">
+              Entrada e ações
+            </h2>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Separador final
-                  </label>
-                  <input
-                    type="text"
-                    value={joinWith}
-                    onChange={handleJoinWithChange}
-                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none ring-0 transition focus:border-sky-400"
-                  />
-                </div>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Faça upload dos arquivos, defina o separador final e aplique a
+              regra para toda a lista.
+            </p>
 
-                {templateHasRevision && (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700">
-                      Revisão global
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={globalRevision}
-                        onChange={(event) => setGlobalRevision(event.target.value)}
-                        placeholder="Ex.: 02"
-                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-sky-400"
-                      />
-                      <button
-                        type="button"
-                        onClick={applyGlobalRevision}
-                        className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-                      >
-                        Aplicar
-                      </button>
-                    </div>
+            <div className="mt-6 grid gap-4">
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-slate-700">
+                  Arquivos PDF e DWG
+                </span>
+
+                <input
+                  type="file"
+                  accept=".pdf,.dwg"
+                  multiple
+                  onChange={handleFileChange}
+                  className="block w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 file:mr-4 file:rounded-xl file:border-0 file:bg-sky-100 file:px-4 file:py-2 file:font-medium file:text-sky-700 hover:file:bg-sky-200"
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-slate-700">
+                  Separador final
+                </span>
+
+                <input
+                  value={joinWith}
+                  onChange={handleJoinWithChange}
+                  placeholder="Ex.:  - "
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-sky-400"
+                />
+              </label>
+
+              {templateHasRevision && (
+                <div className="grid gap-2">
+                  <span className="text-sm font-medium text-slate-700">
+                    Revisão global
+                  </span>
+
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <input
+                      value={globalRevision}
+                      onChange={(event) => setGlobalRevision(event.target.value)}
+                      placeholder="Ex.: 02"
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-sky-400"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={applyGlobalRevision}
+                      className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800"
+                    >
+                      Aplicar
+                    </button>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
-              <div className="mt-5 flex flex-wrap gap-3">
+              <div className="flex flex-wrap gap-3 pt-2">
                 <button
                   type="button"
                   onClick={applyTemplateToAllFiles}
-                  disabled={files.length === 0 || templateParts.length === 0}
-                  className="rounded-2xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  className="rounded-2xl bg-sky-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-sky-700"
                 >
                   Aplicar regra em todos
                 </button>
@@ -290,162 +348,233 @@ function App() {
                 <button
                   type="button"
                   onClick={downloadZip}
-                  disabled={files.length === 0}
-                  className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-emerald-700"
                 >
                   Baixar ZIP
                 </button>
               </div>
-            </section>
 
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-slate-950">Preset do modelo</h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Salve e recarregue combinações de ordem, marcação e separador.
-                  </p>
-                </div>
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
+                Arquivos válidos carregados: <strong>{files.length}</strong>
               </div>
+            </div>
+          </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-slate-900">
+              Presets do modelo
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Salve combinações de ordem, ativação de blocos e separador. Você
+              também pode exportar e importar presets em JSON.
+            </p>
+
+            <div className="mt-6 grid gap-4">
+              <label className="grid gap-2">
+                <span className="text-sm font-medium text-slate-700">
+                  Nome do preset
+                </span>
+
                 <input
-                  type="text"
                   value={presetName}
                   onChange={(event) => setPresetName(event.target.value)}
-                  placeholder="Nome do preset"
+                  placeholder="Ex.: Escritório - PDF padrão"
                   className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-sky-400"
                 />
+              </label>
 
+              <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={savePreset}
-                  disabled={!presetName.trim() || templateParts.length === 0}
-                  className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  onClick={handleSavePreset}
+                  className="rounded-2xl bg-slate-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800"
                 >
                   Salvar preset
                 </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportPresets}
+                  className="rounded-2xl bg-white px-5 py-3 text-sm font-medium text-slate-800 ring-1 ring-slate-300 transition hover:bg-slate-100"
+                >
+                  Exportar presets
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenImport}
+                  className="rounded-2xl bg-white px-5 py-3 text-sm font-medium text-slate-800 ring-1 ring-slate-300 transition hover:bg-slate-100"
+                >
+                  Importar presets
+                </button>
+
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleImportPresets}
+                  className="hidden"
+                />
               </div>
 
-              <div className="mt-5 space-y-3">
-                {savedPresets.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
-                    Nenhum preset salvo ainda.
-                  </div>
-                ) : (
-                  savedPresets.map((preset) => (
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
+                Presets salvos: <strong>{savedPresets.length}</strong>
+              </div>
+
+              {savedPresets.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                  Nenhum preset salvo ainda.
+                </div>
+              ) : (
+                <div className="grid gap-3">
+                  {savedPresets.map((preset) => (
                     <div
                       key={preset.id}
-                      className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
                     >
-                      <div>
-                        <p className="font-semibold text-slate-900">{preset.name}</p>
-                        <p className="mt-1 text-sm text-slate-600">
-                          Separador: <span className="rounded bg-white px-2 py-1 font-mono">{preset.joinWith}</span>
-                        </p>
-                      </div>
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <p className="font-semibold text-slate-800">
+                            {preset.name}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Separador: <strong>{preset.joinWith}</strong>
+                          </p>
+                        </div>
 
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => loadPreset(preset)}
-                          className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-800 ring-1 ring-slate-300 transition hover:bg-slate-100"
-                        >
-                          Carregar
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => loadPreset(preset)}
+                            className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-800 ring-1 ring-slate-300 transition hover:bg-slate-100"
+                          >
+                            Carregar
+                          </button>
 
-                        <button
-                          type="button"
-                          onClick={() => deletePreset(preset.id)}
-                          className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-50"
-                        >
-                          Excluir
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => deletePreset(preset.id)}
+                            className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-rose-700 ring-1 ring-rose-200 transition hover:bg-rose-50"
+                          >
+                            Excluir
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  ))
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-8 grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-slate-900">
+              Arquivo modelo
+            </h2>
+
+            {files.length === 0 ? (
+              <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                Nenhum arquivo carregado ainda.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                  <p className="text-sm text-slate-500">Arquivo base</p>
+                  <p className="mt-1 font-medium text-slate-800">
+                    {files[0].originalName}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                  <p className="text-sm text-slate-500">Preview do modelo</p>
+                  <p className="mt-1 font-medium text-slate-800">
+                    {templatePreview || '—'}
+                  </p>
+                </div>
+
+                {templateHasRevision && (
+                  <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+                    Revisão detectada no modelo.
+                  </div>
                 )}
               </div>
-            </section>
+            )}
           </div>
 
-          <div className="space-y-6">
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-slate-950">Arquivo modelo</h2>
+          <PresetEditor
+            parts={templateParts}
+            onPartsChange={handleTemplatePartsChange}
+          />
+        </section>
 
-              {files.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">Nenhum arquivo carregado ainda.</p>
-              ) : (
-                <>
-                  <div className="mt-4 space-y-3 rounded-2xl bg-slate-50 p-4">
-                    <p className="text-sm text-slate-700">
-                      <span className="font-semibold text-slate-900">Arquivo:</span>{' '}
-                      {files[0].originalName}
-                    </p>
-                    <p className="text-sm text-slate-700">
-                      <span className="font-semibold text-slate-900">Preview:</span>{' '}
-                      {templatePreview}
-                    </p>
-                    {templateHasRevision && (
-                      <p className="text-sm font-medium text-emerald-700">
-                        Revisão detectada no modelo.
-                      </p>
-                    )}
-                  </div>
+        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-900">
+            Arquivos e previews
+          </h2>
 
-                  <div className="mt-5">
-                    <PresetEditor
-                      parts={templateParts}
-                      onPartsChange={handleTemplatePartsChange}
-                    />
-                  </div>
-                </>
-              )}
-            </section>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Veja o preview ao vivo de cada arquivo e o nome que será aplicado no
+            ZIP final.
+          </p>
 
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-slate-950">Arquivos e previews</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Veja o preview ao vivo e o nome efetivamente aplicado.
-              </p>
+          {files.length === 0 ? (
+            <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+              Faça upload de arquivos para ver a lista aqui.
+            </div>
+          ) : (
+            <div className="mt-6 grid gap-4">
+              {files.map((file) => {
+                const livePreview = getPreviewNameFromTemplate(
+                  file,
+                  templateParts,
+                  joinWith,
+                )
 
-              <div className="mt-5 space-y-4">
-                {files.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
-                    Faça upload de arquivos para ver a lista aqui.
-                  </div>
-                ) : (
-                  files.map((file) => {
-                    const livePreview = getPreviewNameFromTemplate(file, templateParts, joinWith)
-
-                    return (
-                      <div
-                        key={file.id}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                      >
-                        <p className="text-sm text-slate-700">
-                          <span className="font-semibold text-slate-900">Original:</span>{' '}
+                return (
+                  <article
+                    key={file.id}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
+                  >
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Original
+                        </p>
+                        <p className="mt-2 break-all text-sm font-medium text-slate-800">
                           {file.originalName}
                         </p>
-                        <p className="mt-2 text-sm text-slate-700">
-                          <span className="font-semibold text-slate-900">Preview ao vivo:</span>{' '}
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Preview ao vivo
+                        </p>
+                        <p className="mt-2 break-all text-sm font-medium text-sky-700">
                           {livePreview}
                         </p>
-                        <p className="mt-2 text-sm text-slate-700">
-                          <span className="font-semibold text-slate-900">Nome aplicado:</span>{' '}
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Nome aplicado
+                        </p>
+                        <p className="mt-2 break-all text-sm font-medium text-emerald-700">
                           {file.newName}
                         </p>
                       </div>
-                    )
-                  })
-                )}
-              </div>
-            </section>
-          </div>
-        </div>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+        </section>
+
+        <AppFooter version={APP_VERSION} />
       </div>
-    </div>
+    </main>
   )
 }
-
-export default App

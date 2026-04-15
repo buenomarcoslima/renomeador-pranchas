@@ -32,3 +32,10 @@ export type RenamePreset = {
   partOrder: number[]
   partStates: RenamePresetPartState[]
 }
+
+export type PresetTransferPayload = {
+  app: string
+  version: string
+  exportedAt: string
+  presets: RenamePreset[]
+}
